@@ -96,6 +96,7 @@ pub fn handle_chat(
                         // Add `DiscordChatRelay` Component
                         commands.entity(*entity).insert(DiscordChatRelay {
                             channel_id: ChannelId::new(chat_relay_channel_id),
+                            entity: *entity
                         });
                     }
 
@@ -105,6 +106,7 @@ pub fn handle_chat(
                         // Add `DiscordChannelId` Component
                         commands.entity(*entity).insert(DiscordChannelId {
                             channel_id: ChannelId::new(channel_id),
+                            entity: *entity
                         });
 
                         // Send a Notification that bot has joined

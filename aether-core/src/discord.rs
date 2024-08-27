@@ -22,12 +22,14 @@ pub struct AetherDiscordPlugin;
 #[derive(Component)]
 pub struct DiscordChatRelay {
     pub channel_id: ChannelId,
+    pub entity: Entity
 }
 
 /// Component present when `channel_id` is passed in `config.json`
 #[derive(Component)]
 pub struct DiscordChannelId {
     pub channel_id: ChannelId,
+    pub entity: Entity
 }
 
 impl Plugin for AetherDiscordPlugin {
@@ -48,18 +50,18 @@ impl Plugin for AetherDiscordPlugin {
 #[allow(clippy::complexity)]
 fn handle_chat_relay(
     mut events: EventReader<ChatReceivedEvent>,
-    query: Query<(&DiscordChatRelay, &Bot), (With<Player>, With<LocalEntity>)>,
+    query: Query<(&DiscordChatRelay, &Bot), (With<Player>, With<LocalEntity>, With<DiscordChatRelay>)>,
     discord_bot_res: Res<DiscordBotRes>,
 ) {
-    for ChatReceivedEvent { entity: _, packet } in events.read() {
-        for (DiscordChatRelay { channel_id }, state) in query.iter() {
-            let (sender, message) = packet.split_sender_and_content();
+    for chat_received_packet in events.read() {
+        for (discord_chat_relay, state) in query.iter() {
+            let (sender, message) = chat_received_packet.packet.split_sender_and_content();
             let sender = sender.unwrap_or("Server".to_string());
 
             if sender != state.username
                 && let Some(http) = discord_bot_res.get_http()
             {
-                let channel_id_clone = channel_id.clone();
+                let channel_id_clone = discord_chat_relay.channel_id.clone();
                 tokio_runtime().spawn(async move {
                     if http
                         .send_message(
@@ -83,7 +85,7 @@ fn handle_chat_relay(
 #[allow(clippy::complexity)]
 fn handle_discord_bridge(
     mut events: EventReader<BMessage>,
-    query: Query<(&DiscordChatRelay, Entity), (With<Player>, With<LocalEntity>)>,
+    query: Query<&DiscordChatRelay, (With<Player>, With<LocalEntity>, With<DiscordChatRelay>)>,
     mut send_chat_kind_event: EventWriter<SendChatKindEvent>,
 ) {
     for BMessage {
@@ -91,10 +93,10 @@ fn handle_discord_bridge(
         new_message,
     } in events.read()
     {
-        for (DiscordChatRelay { channel_id }, entity) in query.iter() {
-            if !new_message.author.bot && &new_message.channel_id == channel_id {
+        for discord_chat_relay in query.iter() {
+            if !new_message.author.bot && &new_message.channel_id == &discord_chat_relay.channel_id {
                 send_chat_kind_event.send(SendChatKindEvent {
-                    entity,
+                    entity: discord_chat_relay.entity,
                     content: new_message.content.to_owned(),
                     kind: ChatPacketKind::Message,
                 });
@@ -106,7 +108,7 @@ fn handle_discord_bridge(
 #[allow(clippy::complexity)]
 fn handle_disocrd_channel_id(
     mut events: EventReader<BMessage>,
-    query: Query<(&DiscordChannelId, Entity), (With<Player>, With<LocalEntity>)>,
+    query: Query<&DiscordChannelId, (With<Player>, With<LocalEntity>, With<DiscordChannelId>)>,
     mut chat_received_event: EventWriter<ChatReceivedEvent>,
 ) {
     for BMessage {
@@ -114,8 +116,8 @@ fn handle_disocrd_channel_id(
         new_message,
     } in events.read()
     {
-        for (DiscordChannelId { channel_id }, entity) in query.iter() {
-            if !new_message.author.bot && &new_message.channel_id == channel_id {
+        for discord_channel_id in query.iter() {
+            if !new_message.author.bot && &new_message.channel_id == &discord_channel_id.channel_id {
                 match new_message
                     .content
                     .split_whitespace()
@@ -124,7 +126,7 @@ fn handle_disocrd_channel_id(
                 {
                     ["!pearl", "load", username] => {
                         chat_received_event.send(ChatReceivedEvent {
-                            entity,
+                            entity: discord_channel_id.entity,
                             packet: ChatPacket::System(Arc::new(ClientboundSystemChatPacket {
                                 overlay: true,
                                 content: format!("{} whispers: !pearl load", username).into(),
